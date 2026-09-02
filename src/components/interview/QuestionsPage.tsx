@@ -10,12 +10,19 @@ import ReportView from "@/components/interview/ReportView";
 import { getProfile, getReport, submitAnswer } from "@/lib/api";
 import type { InterviewReport, Question } from "@/types";
 
-interface SavedInterview { questions?: Question[]; }
+interface SavedInterview {
+  questions?: Question[];
+}
 
 function readSavedInterview(): SavedInterview | null {
   const value = localStorage.getItem("interview");
   if (!value) return null;
-  try { return JSON.parse(value) as SavedInterview; } catch { localStorage.removeItem("interview"); return null; }
+  try {
+    return JSON.parse(value) as SavedInterview;
+  } catch {
+    localStorage.removeItem("interview");
+    return null;
+  }
 }
 
 export function QuestionsPage({ interviewId }: { interviewId: string }) {
@@ -30,18 +37,22 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [integrityWarning, setIntegrityWarning] = useState("");
   const [integrityEvents, setIntegrityEvents] = useState(0);
+  const [terminated, setTerminated] = useState(false);
 
-  // Guards against double-start: once true, never call setInterviewStarted(true) again,
-  // even if effects re-run (Strict Mode) or cameraPermission flips off/on.
   const hasStartedRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
+  const lastAnswerRef = useRef<{ answer: string; timeTaken: number } | null>(null);
+  const terminatedRef = useRef(false);
 
   useEffect(() => {
     const saved = readSavedInterview();
-    if (saved) queueMicrotask(() => setQuestions(Array.isArray(saved.questions) ? saved.questions : []));
+    if (saved) {
+      queueMicrotask(() =>
+        setQuestions(Array.isArray(saved.questions) ? saved.questions : [])
+      );
+    }
   }, []);
 
-  // Auto-start countdown: begins once camera permission is granted, runs exactly once.
   useEffect(() => {
     if (!cameraPermission || hasStartedRef.current || intervalRef.current !== null) return;
 
@@ -72,19 +83,49 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
     };
   }, [cameraPermission]);
 
+  // Tab-change / visibility detection → terminate immediately
   useEffect(() => {
-    function flagActivity(message: string) { setIntegrityEvents((count) => count + 1); setIntegrityWarning(message); }
-    function handleVisibility() { if (document.hidden) flagActivity("You left the interview tab. Please return and keep this window focused."); }
-    function handleBlur() { flagActivity("The interview window lost focus. Please keep the interview window active."); }
-    function handleFullscreen() { if (!document.fullscreenElement) flagActivity("Fullscreen was exited. Please keep the interview window visible."); }
-    function handleClipboard() { flagActivity("Copy or paste activity was detected during the interview."); }
+    if (!interviewStarted) return;
+
+    function terminate() {
+      if (terminatedRef.current) return;
+      terminatedRef.current = true;
+      setTerminated(true);
+      localStorage.removeItem("interview");
+    }
+
+    function handleVisibility() {
+      if (document.hidden) terminate();
+    }
+
     document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [interviewStarted]);
+
+  // Integrity warnings for everything else (blur, fullscreen, clipboard)
+  useEffect(() => {
+    function flagActivity(message: string) {
+      setIntegrityEvents((count) => count + 1);
+      setIntegrityWarning(message);
+    }
+    function handleBlur() {
+      flagActivity("The interview window lost focus. Please keep the interview window active.");
+    }
+    function handleFullscreen() {
+      if (!document.fullscreenElement) {
+        flagActivity("Fullscreen was exited. Please keep the interview window visible.");
+      }
+    }
+    function handleClipboard() {
+      flagActivity("Copy or paste activity was detected during the interview.");
+    }
     window.addEventListener("blur", handleBlur);
     document.addEventListener("fullscreenchange", handleFullscreen);
     document.addEventListener("copy", handleClipboard);
     document.addEventListener("paste", handleClipboard);
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("blur", handleBlur);
       document.removeEventListener("fullscreenchange", handleFullscreen);
       document.removeEventListener("copy", handleClipboard);
@@ -94,13 +135,80 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
 
   const question = questions[index];
 
-  async function next(answer: string, timeTaken: number) {
-    setBusy(true); setError("");
+  async function next(answer: string, timeTaken: number, attempt = 0) {
+    lastAnswerRef.current = { answer, timeTaken };
+    setBusy(true);
+    setError("");
     try {
       await submitAnswer(interviewId, { questionId: question.id, answer, timeTaken });
-      if (index === questions.length - 1) router.push(`/interview/${interviewId}/report`); else setIndex(index + 1);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not submit your answer. Please try again."); }
-    finally { setBusy(false); }
+      lastAnswerRef.current = null;
+      if (index === questions.length - 1) {
+        router.push(`/interview/${interviewId}/report`);
+      } else {
+        setIndex(index + 1);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "";
+      const isRateLimited = /429|quota|rate limit/i.test(message);
+
+      if (isRateLimited && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
+        return next(answer, timeTaken, attempt + 1);
+      }
+
+      setError(
+        isRateLimited
+          ? "The interview service is temporarily busy. Your answer was recorded — please wait a moment and try submitting again."
+          : message || "Could not submit your answer. Please try again."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function retryLastAnswer() {
+    if (lastAnswerRef.current) {
+      void next(lastAnswerRef.current.answer, lastAnswerRef.current.timeTaken);
+    }
+  }
+
+  // Termination screen — shown immediately on tab switch
+  if (terminated) {
+    return (
+      <div className="interview-layout">
+        <section>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 18,
+              padding: "60px 24px",
+              textAlign: "center",
+            }}
+          >
+            <AlertTriangle size={48} color="#b54708" />
+            <h2 style={{ margin: 0, color: "#b54708" }}>Interview Terminated</h2>
+            <p style={{ maxWidth: 420, margin: 0, color: "#555", fontSize: 15 }}>
+              Your interview was automatically closed because a tab change was detected.
+              To maintain fairness, switching tabs or leaving the interview window is not
+              permitted during an active session.
+            </p>
+            <p style={{ maxWidth: 420, margin: 0, color: "#555", fontSize: 15 }}>
+              Please begin a new interview to continue.
+            </p>
+            <button
+              className="button primary"
+              style={{ marginTop: 8 }}
+              onClick={() => router.push("/interview/new")}
+            >
+              Start a new interview
+            </button>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -113,19 +221,63 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
           </div>
         </div>
         {!cameraPermission && !error && (
-          <div className="notice error">Enable camera access to begin — the interview starts automatically once access is granted.</div>
+          <div className="notice error">
+            Enable camera access to begin — the interview starts automatically once access is granted.
+          </div>
         )}
         {integrityWarning && (
-          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "13px 15px", marginBottom: 16, border: "1px solid #fecdca", borderRadius: 9, background: "#fff6ed", color: "#b54708", fontSize: 13 }}>
+          <div
+            role="alert"
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+              padding: "13px 15px",
+              marginBottom: 16,
+              border: "1px solid #fecdca",
+              borderRadius: 9,
+              background: "#fff6ed",
+              color: "#b54708",
+              fontSize: 13,
+            }}
+          >
             <AlertTriangle size={19} />
             <div>
               <strong style={{ display: "block" }}>Interview integrity warning</strong>
-              <span style={{ display: "block", marginTop: 3 }}>{integrityWarning} Event {integrityEvents} recorded.</span>
+              <span style={{ display: "block", marginTop: 3 }}>
+                {integrityWarning} Event {integrityEvents} recorded.
+              </span>
             </div>
-            <button style={{ marginLeft: "auto", border: 0, background: "none", color: "#b54708", fontSize: 12, fontWeight: 700 }} onClick={() => setIntegrityWarning("")}>Dismiss</button>
+            <button
+              style={{
+                marginLeft: "auto",
+                border: 0,
+                background: "none",
+                color: "#b54708",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+              onClick={() => setIntegrityWarning("")}
+            >
+              Dismiss
+            </button>
           </div>
         )}
-        {error && <div className="notice error">{error}</div>}
+        {error && (
+          <div className="notice error">
+            {error}
+            {lastAnswerRef.current && (
+              <button
+                className="button secondary"
+                style={{ marginLeft: 12 }}
+                onClick={retryLastAnswer}
+                disabled={busy}
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
         {question && interviewStarted && cameraActive ? (
           <>
             <QuestionCard question={question} index={index} total={questions.length} />
@@ -139,11 +291,20 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
               ? `Interview starting in ${countdown}...`
               : !cameraActive
               ? "Starting interview and proctoring..."
-              : <>No questions found. <a href="/interview/new">Start a new interview</a></>}
+              : (
+                <>
+                  No questions found. <a href="/interview/new">Start a new interview</a>
+                </>
+              )}
           </div>
         )}
       </section>
-      <ProctorCamera interviewId={interviewId} startRequested={interviewStarted} onStatus={setCameraActive} onPermission={setCameraPermission} />
+      <ProctorCamera
+        interviewId={interviewId}
+        startRequested={interviewStarted}
+        onStatus={setCameraActive}
+        onPermission={setCameraPermission}
+      />
     </div>
   );
 }
@@ -151,22 +312,48 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
 export function ReportPage({ interviewId }: { interviewId: string }) {
   const [report, setReport] = useState<InterviewReport | null>(null);
   const [error, setError] = useState("");
+
   async function loadReport() {
     setError("");
     for (let attempt = 0; attempt < 6; attempt += 1) {
       try {
         const latest = await getReport(interviewId);
-        if (latest.questionResults.length || latest.overallScore > 0 || latest.strengths.length || latest.improvements.length) {
+        if (
+          latest.questionResults.length ||
+          latest.overallScore > 0 ||
+          latest.strengths.length ||
+          latest.improvements.length
+        ) {
           const profile = await getProfile().catch(() => null);
-          setReport(profile ? { ...latest, candidate: { ...latest.candidate, name: latest.candidate?.name || profile.name, email: latest.candidate?.email || profile.email, profilePicture: latest.candidate?.profilePicture || profile.profilePicture } } : latest);
+          setReport(
+            profile
+              ? {
+                  ...latest,
+                  candidate: {
+                    ...latest.candidate,
+                    name: latest.candidate?.name || profile.name,
+                    email: latest.candidate?.email || profile.email,
+                    profilePicture: latest.candidate?.profilePicture || profile.profilePicture,
+                  },
+                }
+              : latest
+          );
           return;
         }
-      } catch { }
-      if (attempt < 5) await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      } catch {
+        // swallow and retry
+      }
+      if (attempt < 5) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      }
     }
     setError("The interview report is not available until the interview is completed.");
   }
-  useEffect(() => { queueMicrotask(() => void loadReport()); }, [interviewId]);
+
+  useEffect(() => {
+    queueMicrotask(() => void loadReport());
+  }, [interviewId]);
+
   if (error) return <div className="notice error">{error}</div>;
   return report ? <ReportView report={report} /> : <div className="loading">Preparing your completed report...</div>;
 }
