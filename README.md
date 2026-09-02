@@ -1,36 +1,135 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Interview Analyzer
+
+AI Interview Analyzer is a Next.js application for resume-based interview practice. Candidates upload a resume, choose a target role and difficulty, complete a proctored interview, and review their performance report.
+
+## Features
+
+- Email-based signup, verification, login, and OTP password recovery
+- Resume upload with backend resume validation and parsing
+- AI-generated technical, behavioral, and situational questions
+- Live text answers with per-question timing
+- Camera-based proctoring with permission handling and cleanup
+- Interview integrity warnings for tab switches, window blur, fullscreen exit, copy, and paste activity
+- Partial progress reports for unfinished interviews
+- Completed reports with scoring, feedback, strengths, improvements, and PDF download
+- Responsive dashboard, profile, and interview workspace
+
+## Tech Stack
+
+- Next.js App Router
+- React and TypeScript
+- Tailwind CSS
+- React Hook Form and Zod
+- Lucide React
+- react-hot-toast
+- Backend Gemini integration through the API service
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies:
+
+```bash
+npm install
+```
+
+Create `.env.local` in the project root:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=https://your-api-host.example.com
+```
+
+Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploying to Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Import this repository into Vercel. Vercel detects the Next.js framework automatically and uses the existing build settings.
 
-## Learn More
+Add this production environment variable in **Project Settings > Environment Variables**:
 
-To learn more about Next.js, take a look at the following resources:
+```env
+NEXT_PUBLIC_API_BASE_URL=https://your-production-backend.example.com
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Deploy with the Vercel dashboard or the Vercel CLI:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npx vercel
+npx vercel --prod
+```
 
-## Deploy on Vercel
+The backend must allow requests from the deployed Vercel domain through CORS. Camera proctoring also requires HTTPS, which Vercel provides automatically.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Available Commands
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run dev
+npm run lint
+npm run build
+npm run start
+```
+
+## Application Flow
+
+1. Create an account and verify the email OTP.
+2. Sign in and open **New interview**.
+3. Upload a resume and provide the target job role.
+4. The backend verifies and parses the resume, then generates questions.
+5. Answer each question while camera proctoring is active.
+6. End the interview or finish the final question.
+7. Review the completed or partial report.
+
+## API Configuration
+
+All requests are centralized in `src/lib/api.ts`. Authenticated requests automatically attach the bearer token stored in the browser and handle expired sessions.
+
+The frontend expects these backend endpoints:
+
+- `/api/auth/signup`
+- `/api/auth/verify-email`
+- `/api/auth/login`
+- `/api/auth/forgot-password`
+- `/api/auth/reset-password`
+- `/api/user/dashboard`
+- `/api/user/profile`
+- `/api/interview/upload-resume`
+- `/api/interview/generate-questions`
+- `/api/interview/:interviewId/answer`
+- `/api/interview/:interviewId/proctor/start`
+- `/api/interview/:interviewId/proctor/terminate`
+- `/api/interview/:interviewId/report`
+- `/api/interview/:interviewId/report/download`
+
+Resume verification and Gemini processing are performed by the backend upload and interview APIs. No Gemini API key is required in the frontend.
+
+## Project Structure
+
+```text
+src/
+  app/
+    (auth)/
+    (dashboard)/
+    auth-enhancements.css
+    globals.css
+    ui-enhancements.css
+  components/
+    auth/
+    interview/
+    layout/
+    ui/
+  hooks/
+  lib/
+  types/
+middleware.ts
+```
+
+## Notes
+
+- Protected dashboard and interview routes require the `token` cookie.
+- The browser also stores the auth token and current interview session in localStorage.
+- Camera access is required for active proctoring, but camera cleanup is handled when the interview ends or the page changes.
