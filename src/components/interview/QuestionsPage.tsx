@@ -7,7 +7,7 @@ import QuestionCard from "@/components/interview/QuestionCard";
 import AnswerRecorder from "@/components/interview/AnswerRecorder";
 import ProctorCamera from "@/components/interview/ProctorCamera";
 import ReportView from "@/components/interview/ReportView";
-import { getReport, submitAnswer, terminateProctor } from "@/lib/api";
+import { getProfile, getReport, submitAnswer, terminateProctor } from "@/lib/api";
 import type { Answer, InterviewReport, Question } from "@/types";
 
 interface SavedInterview { questions?: Question[]; answers?: Answer[]; }
@@ -26,6 +26,7 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
   const [ending, setEnding] = useState(false);
   const [stopCamera, setStopCamera] = useState(false);
   const [error, setError] = useState("");
+  const [cameraActive, setCameraActive] = useState(false);
   const [integrityWarning, setIntegrityWarning] = useState("");
   const [integrityEvents, setIntegrityEvents] = useState(0);
   useEffect(() => { const saved = readSavedInterview(); if (saved) queueMicrotask(() => setQuestions(Array.isArray(saved.questions) ? saved.questions : [])); }, []);
@@ -51,12 +52,12 @@ export function QuestionsPage({ interviewId }: { interviewId: string }) {
     finally { setBusy(false); }
   }
   async function endInterview() {
-    if (ending) return;
+    if (ending || !cameraActive) { if (!cameraActive) setError("Enable camera access before ending or starting the interview."); return; }
     setEnding(true); setStopCamera(true); setError("");
     try { await terminateProctor(interviewId); router.push(`/interview/${interviewId}/report`); }
     catch (e) { setError(e instanceof Error ? e.message : "Could not end the interview. Please try again."); setEnding(false); }
   }
-  return <div className="interview-layout"><section><div className="section-heading"><div><div className="eyebrow">02 / Live interview</div><h2>Stay present. Stay specific.</h2></div><button className="button secondary" onClick={endInterview} disabled={ending || busy}>{ending ? "Ending..." : "End interview"}</button></div>{integrityWarning && <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "13px 15px", marginBottom: 16, border: "1px solid #fecdca", borderRadius: 9, background: "#fff6ed", color: "#b54708", fontSize: 13 }}><AlertTriangle size={19} /><div><strong style={{ display: "block" }}>Interview integrity warning</strong><span style={{ display: "block", marginTop: 3 }}>{integrityWarning} Event {integrityEvents} recorded.</span></div><button style={{ marginLeft: "auto", border: 0, background: "none", color: "#b54708", fontSize: 12, fontWeight: 700 }} onClick={() => setIntegrityWarning("")}>Dismiss</button></div>}{error && <div className="notice error">{error}</div>}{question ? <><QuestionCard question={question} index={index} total={questions.length} /><AnswerRecorder key={question.id} onSubmit={next} busy={busy || ending} /></> : <div className="panel">No questions found. <a href="/interview/new">Start a new interview</a></div>}</section><ProctorCamera interviewId={interviewId} stopRequested={stopCamera} /></div>;
+  return <div className="interview-layout"><section><div className="section-heading"><div><div className="eyebrow">02 / Live interview</div><h2>{cameraActive ? "Stay present. Stay specific." : "Camera access required."}</h2></div><button className="button secondary" onClick={endInterview} disabled={ending || busy || !cameraActive}>{ending ? "Ending..." : "End interview"}</button></div>{!cameraActive && !error && <div className="notice error">Enable camera access to start answering interview questions.</div>}{integrityWarning && <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "13px 15px", marginBottom: 16, border: "1px solid #fecdca", borderRadius: 9, background: "#fff6ed", color: "#b54708", fontSize: 13 }}><AlertTriangle size={19} /><div><strong style={{ display: "block" }}>Interview integrity warning</strong><span style={{ display: "block", marginTop: 3 }}>{integrityWarning} Event {integrityEvents} recorded.</span></div><button style={{ marginLeft: "auto", border: 0, background: "none", color: "#b54708", fontSize: 12, fontWeight: 700 }} onClick={() => setIntegrityWarning("")}>Dismiss</button></div>}{error && <div className="notice error">{error}</div>}{question && cameraActive ? <><QuestionCard question={question} index={index} total={questions.length} /><AnswerRecorder key={question.id} onSubmit={next} busy={busy || ending} /></> : <div className="panel">{cameraActive ? <>No questions found. <a href="/interview/new">Start a new interview</a></> : "Camera permission is required before the interview can begin."}</div>}</section><ProctorCamera interviewId={interviewId} stopRequested={stopCamera} onStatus={setCameraActive} /></div>;
 }
 
 function createPartialReport(interviewId: string, saved: SavedInterview): InterviewReport {
@@ -76,7 +77,7 @@ export function ReportPage({ interviewId }: { interviewId: string }) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
       try {
         const latest = await getReport(interviewId);
-        if (latest.questionResults.length || latest.overallScore > 0 || latest.strengths.length || latest.improvements.length) { setReport(latest); setPartial(false); return; }
+          if (latest.questionResults.length || latest.overallScore > 0 || latest.strengths.length || latest.improvements.length) { const profile = await getProfile().catch(() => null); setReport(profile ? { ...latest, candidate: { ...latest.candidate, name: latest.candidate?.name || profile.name, email: latest.candidate?.email || profile.email, profilePicture: latest.candidate?.profilePicture || profile.profilePicture } } : latest); setPartial(false); return; }
       } catch { }
       if (attempt < 5) await new Promise((resolve) => window.setTimeout(resolve, 2000));
     }

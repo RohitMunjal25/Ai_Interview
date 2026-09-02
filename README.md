@@ -54,6 +54,7 @@ Add this production environment variable in **Project Settings > Environment Var
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://your-production-backend.example.com
+NEXT_PUBLIC_PROFILE_UPDATE_URL=/api/user/profile
 ```
 
 Deploy with the Vercel dashboard or the Vercel CLI:
@@ -64,6 +65,8 @@ npx vercel --prod
 ```
 
 The backend must allow requests from the deployed Vercel domain through CORS. Camera proctoring also requires HTTPS, which Vercel provides automatically.
+
+Profile-photo updates require the backend to expose `NEXT_PUBLIC_PROFILE_UPDATE_URL`; the current API deployment exposes profile reads only.
 
 ## Available Commands
 

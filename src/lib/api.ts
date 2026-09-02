@@ -38,7 +38,8 @@ export async function apiClient<T>(path: string, options: RequestInit = {}) {
   const timeout = globalThis.setTimeout(() => controller.abort(), 90000);
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    const url = path.startsWith("http://") || path.startsWith("https://") ? path : `${API_BASE}${path}`;
+    response = await fetch(url, {
       ...options,
       cache: "no-store",
       signal: options.signal || controller.signal,
@@ -101,6 +102,19 @@ function findResumeId(value: unknown): string {
   }
   return "";
 }
+function textField(value: unknown, keys: string[]): string {
+  if (!value || typeof value !== "object") return "";
+  const object = value as Record<string, unknown>;
+  for (const key of keys) {
+    const candidate = object[key];
+    if (typeof candidate === "string" && candidate) return candidate;
+    if (candidate && typeof candidate === "object") {
+      const nested: string = textField(candidate, ["text", "content", "answer", "value", "response"]);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
 const requireInterviewId = (interviewId: string) => {
   if (!interviewId || interviewId === "undefined" || interviewId === "null") throw new ApiError("Interview ID is missing.", 400);
   return encodeURIComponent(interviewId);
@@ -145,7 +159,7 @@ export async function getProfile() {
     const response = await apiClient<Record<string, unknown>>("/api/user/profile");
     const payload = (response.data as Record<string, unknown> | undefined) || response;
     const user = (payload.user as Record<string, unknown> | undefined) || payload;
-    return { id: String(user.id || user._id || ""), name: String(user.name || ""), email: String(user.email || ""), createdAt: String(user.createdAt || user.created_at || "") } satisfies User;
+    return { id: String(user.id || user._id || ""), name: String(user.name || ""), email: String(user.email || ""), createdAt: String(user.createdAt || user.created_at || ""), profilePicture: String(user.profilePicture || user.profile_picture || user.profilePic || user.profile_pic || user.profileImage || user.profile_image || user.avatar || user.image || user.photo || user.cloudinaryUrl || "") || undefined } satisfies User;
   } catch (error) {
     if (error instanceof ApiError && error.statusCode === 304) {
       const user = getStoredUser();
@@ -153,6 +167,15 @@ export async function getProfile() {
     }
     throw error;
   }
+}
+
+export async function updateProfilePicture(file: File) {
+  if (!file.type.startsWith("image/") || file.type !== "image/jpeg") throw new ApiError("Please choose a JPEG image.", 400);
+  const updateUrl = process.env.NEXT_PUBLIC_PROFILE_UPDATE_URL;
+  if (!updateUrl) throw new ApiError("Profile photo updates are not enabled by the backend yet.", 501);
+  const form = new FormData();
+  form.append("profilePicture", file, file.name || "profile.jpg");
+  return apiClient<Record<string, unknown>>(updateUrl, { method: "PATCH", body: form });
 }
 
 export async function uploadResume(file: File, jobRole?: string) {
@@ -198,14 +221,25 @@ export async function getReport(interviewId: string) {
   const data = (response.data as Record<string, unknown> | undefined) || response;
   const report = (data.report as Record<string, unknown> | undefined) || data;
   const rawResults = Array.isArray(report.questionResults) ? report.questionResults : Array.isArray(report.results) ? report.results : [];
+  const rawEvaluations = Array.isArray(report.questionEvaluations) ? report.questionEvaluations : [];
+  const results = rawResults.length ? rawResults : rawEvaluations;
   return {
     interviewId: String(report.interviewId || report.interview_id || interviewId),
     overallScore: typeof report.overallScore === "number" ? report.overallScore : Number(report.score || 0),
     feedback: String(report.feedback || "Your interview report is ready."),
-    questionResults: rawResults.map((result) => { const item = result as Record<string, unknown>; return { questionId: String(item.questionId || item.question_id || item.id || item._id || ""), question: String(item.question || item.text || "Question"), answer: String(item.answer || ""), score: typeof item.score === "number" ? item.score : 0, feedback: String(item.feedback || "No feedback provided."), idealAnswer: item.idealAnswer ? String(item.idealAnswer) : undefined }; }),
+    questionResults: results.map((result) => { const item = result as Record<string, unknown>; const evaluation = (item.evaluation as Record<string, unknown> | undefined) || (item.aiEvaluation as Record<string, unknown> | undefined) || (item.answerEvaluation as Record<string, unknown> | undefined) || {}; const aiAnswer = textField(item, ["aiAnswer", "ai_answer", "aiGeneratedAnswer", "ai_generated_answer", "generatedAnswer", "generated_answer", "modelAnswer", "model_answer", "referenceAnswer", "reference_answer", "expectedAnswer", "expected_answer", "sampleAnswer", "sample_answer", "suggestedAnswer", "suggested_answer", "idealAnswer", "ideal_answer"]) || textField(evaluation, ["answer", "aiAnswer", "generatedAnswer", "modelAnswer", "referenceAnswer", "expectedAnswer", "sampleAnswer", "suggestedAnswer", "idealAnswer"]); const candidateAnswer = textField(item, ["candidateAnswer", "candidate_answer", "userAnswer", "user_answer", "submittedAnswer", "submitted_answer", "response", "answer"]); return { questionId: String(item.questionId || item.question_id || item.id || item._id || item.questionIndex || ""), question: String(item.question || item.text || `Question ${String(item.questionIndex || "")}`), answer: candidateAnswer, score: typeof item.score === "number" ? item.score : Number(item.score || 0), feedback: String(item.feedback || item.evaluationText || textField(evaluation, ["feedback", "text", "comment"]) || "No feedback provided."), idealAnswer: aiAnswer || undefined, aiAnswer: aiAnswer || undefined }; }),
     strengths: Array.isArray(report.strengths) ? report.strengths.map(String) : [],
-    improvements: Array.isArray(report.improvements) ? report.improvements.map(String) : [],
+    improvements: Array.isArray(report.improvements) ? report.improvements.map(String) : Array.isArray(report.weaknesses) ? report.weaknesses.map(String) : [],
     completedAt: String(report.completedAt || report.completed_at || new Date().toISOString()),
+    candidate: (report.candidate || {}) as InterviewReport["candidate"],
+    jobRole: String(report.jobRole || report.job_role || ""),
+    interviewDate: String(report.interviewDate || report.interview_date || ""),
+    performanceLevel: String(report.performanceLevel || report.performance_level || ""),
+    summary: String(report.summary || ""),
+    weaknesses: Array.isArray(report.weaknesses) ? report.weaknesses.map(String) : [],
+    recommendations: Array.isArray(report.recommendations) ? report.recommendations.map(String) : [],
+    proctoring: report.proctoring as InterviewReport["proctoring"],
+    reportUrl: String(report.reportUrl || report.report_url || "") || undefined,
   } satisfies InterviewReport;
 }
 export async function downloadReport(interviewId: string) {

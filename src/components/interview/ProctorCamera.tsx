@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, RefreshCw } from "lucide-react";
 import { startProctor, terminateProctor } from "@/lib/api";
 
-export default function ProctorCamera({ interviewId, stopRequested = false }: { interviewId: string; stopRequested?: boolean }) {
+export default function ProctorCamera({ interviewId, stopRequested = false, onStatus }: { interviewId: string; stopRequested?: boolean; onStatus?: (active: boolean) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const snapshotRef = useRef<number | null>(null);
@@ -22,6 +22,7 @@ export default function ProctorCamera({ interviewId, stopRequested = false }: { 
     snapshotRef.current = null;
     proctorStartedRef.current = false;
     setActive(false);
+    onStatus?.(false);
   }
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export default function ProctorCamera({ interviewId, stopRequested = false }: { 
         if (stoppedRef.current) return;
         proctorStartedRef.current = true;
         setActive(true);
+        onStatus?.(true);
         snapshotRef.current = window.setInterval(() => {
           const current = video.current;
           if (current?.videoWidth && current.videoHeight) {
@@ -60,7 +62,7 @@ export default function ProctorCamera({ interviewId, stopRequested = false }: { 
           }
         }, 30000);
       } catch {
-        if (!stoppedRef.current) setError(true);
+        if (!stoppedRef.current) { setError(true); onStatus?.(false); }
       }
     }
     void init();
@@ -71,5 +73,5 @@ export default function ProctorCamera({ interviewId, stopRequested = false }: { 
     };
   }, [interviewId]);
 
-  return <div className="camera-panel"><div className="camera-heading"><span><Camera size={16} /> Proctor view</span><b className={active ? "camera-status active" : "camera-status"}>{active ? "Camera active" : "Camera off"}</b></div>{error ? <div className="camera-fallback"><Camera size={30} /><strong>Camera access required</strong><small>Allow camera permissions to continue proctoring.</small><button className="button secondary" onClick={() => window.location.reload()}><RefreshCw size={15} />Retry</button></div> : <video ref={video} autoPlay muted playsInline />}</div>;
+  return <div className="camera-panel"><div className="camera-heading"><span><Camera size={16} /> Proctor view</span><b className={active ? "camera-status active" : "camera-status"}>{active ? "Camera active" : "Camera off"}</b></div>{error ? <div className="camera-fallback"><Camera size={30} /><strong>Camera access required</strong><small>Allow camera permissions to start the interview.</small><button className="button secondary" onClick={() => window.location.reload()}><RefreshCw size={15} />Enable camera</button></div> : <video ref={video} autoPlay muted playsInline />}</div>;
 }
