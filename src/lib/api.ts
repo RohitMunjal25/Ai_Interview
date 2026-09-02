@@ -215,7 +215,6 @@ export async function startProctor(interviewId: string, image?: Blob) {
   const body = image ? (() => { const form = new FormData(); form.append("image", image, "proctor.jpg"); return form; })() : undefined;
   return apiClient<void>(`/api/interview/${safeInterviewId}/proctor/start`, { method: "POST", body });
 }
-export const terminateProctor = (interviewId: string) => apiClient<void>(`/api/interview/${requireInterviewId(interviewId)}/proctor/terminate`, { method: "POST", body: json({ reason: "Interview ended by candidate" }) });
 export async function getReport(interviewId: string) {
   const response = await apiClient<Record<string, unknown>>(`/api/interview/${requireInterviewId(interviewId)}/report`);
   const data = (response.data as Record<string, unknown> | undefined) || response;
