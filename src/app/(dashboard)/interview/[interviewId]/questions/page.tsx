@@ -1,0 +1,2 @@
+import { QuestionsPage } from "@/components/interview/QuestionsPage";
+export default async function Page({ params }: { params: Promise<{ interviewId: string }> }) { const { interviewId } = await params; return <QuestionsPage interviewId={interviewId} />; }

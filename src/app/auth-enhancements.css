@@ -1,0 +1,19 @@
+.login-page { display:grid; grid-template-columns:minmax(420px, 1fr) minmax(380px, 0.72fr); gap:clamp(42px, 8vw, 130px); align-items:center; padding:84px clamp(28px, 7vw, 110px) 48px; overflow:hidden; background:#f7f8fc; position:relative; }
+.login-page::before { content:""; position:absolute; width:680px; height:680px; left:-270px; bottom:-320px; border:1px solid #dfe2f4; border-radius:50%; box-shadow:0 0 0 34px #ffffff80,0 0 0 68px #e8eaf680,0 0 0 102px #ffffff80; pointer-events:none; }
+.login-page .auth-mark { top:30px; left:clamp(28px,7vw,110px); z-index:2; color:#101828; }
+.login-page .auth-card { width:min(100%,430px); justify-self:start; position:relative; z-index:1; padding:46px; border-radius:20px; box-shadow:0 24px 70px #10182812; }
+.login-page .auth-card h1 { font-size:46px; letter-spacing:-2px; }
+.login-page .button.primary { min-height:50px; transition:transform .2s,box-shadow .2s; box-shadow:0 10px 20px #4f46e52b; }
+.login-page .button.primary:hover { transform:translateY(-2px); box-shadow:0 14px 25px #4f46e53b; }
+.login-showcase { min-height:590px; display:flex; flex-direction:column; justify-content:space-between; max-width:650px; position:relative; z-index:1; padding:34px 0 8px; }
+.showcase-kicker,.showcase-label,.signal-card span,.signal-card small,.showcase-footer { font-size:10px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; }
+.showcase-kicker { color:#98a2b3; }
+.showcase-copy { margin:auto 0; }
+.showcase-label { color:#4f46e5; margin:0 0 20px; }
+.showcase-copy h2 { margin:0; color:#101828; font:600 clamp(42px,5.2vw,72px)/.98 'Space Grotesk'; letter-spacing:-3px; }
+.showcase-copy h2 em { color:#4f46e5; font-style:normal; }
+.showcase-copy > p:last-child { max-width:390px; margin:28px 0 0; color:#667085; font-size:15px; line-height:1.7; }
+.signal-card { width:220px; align-self:flex-end; padding:18px; border:1px solid #dfe3f0; border-radius:13px; background:#fff; box-shadow:0 15px 35px #1018280b; transform:rotate(2deg); }
+.signal-card > div:first-child { display:flex; justify-content:space-between; align-items:center; }.signal-card span { color:#98a2b3; font-size:8px; }.signal-card strong { color:#079455; font:600 16px 'Space Grotesk'; }.signal-bars { display:flex; align-items:flex-end; gap:5px; height:45px; margin:16px 0 13px; }.signal-bars i { display:block; flex:1; border-radius:4px 4px 0 0; background:#c7d2fe; }.signal-bars i:nth-child(1){height:35%}.signal-bars i:nth-child(2){height:55%}.signal-bars i:nth-child(3){height:42%}.signal-bars i:nth-child(4){height:78%;background:#818cf8}.signal-bars i:nth-child(5){height:65%;background:#6366f1}.signal-bars i:nth-child(6){height:92%;background:#4f46e5}.signal-bars i:nth-child(7){height:82%;background:#3730a3}.signal-card small { color:#98a2b3; font-size:8px; letter-spacing:.8px; }.showcase-footer { display:flex; align-items:center; gap:12px; color:#98a2b3; }.footer-line { width:40px; height:1px; background:#cbd5e1; }
+@media (max-width:900px) { .login-page { grid-template-columns:1fr; gap:20px; padding-top:105px; }.login-showcase { min-height:300px; max-width:600px; width:100%; }.showcase-copy { margin:34px 0 28px; }.showcase-copy h2 { font-size:48px; }.signal-card { display:none; }.login-page .auth-card { justify-self:center; } }
+@media (max-width:560px) { .login-page { display:flex; padding:92px 20px 28px; }.login-page .auth-mark { left:20px; }.login-showcase { min-height:230px; }.showcase-copy h2 { font-size:40px; letter-spacing:-2px; }.showcase-copy > p:last-child { font-size:13px; margin-top:18px; }.login-page .auth-card { padding:28px 22px; }.showcase-footer { display:none; } }

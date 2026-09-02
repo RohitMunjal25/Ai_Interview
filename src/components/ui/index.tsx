@@ -1,0 +1,8 @@
+"use client";
+import { LoaderCircle } from "lucide-react";
+export function Button({ loading, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) { return <button className="button primary" disabled={loading || props.disabled} {...props}>{loading && <LoaderCircle size={15} className="spin" />}{children}</button>; }
+export function Input({ label, error, helperText, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label?: string; error?: string; helperText?: string }) { return <label className="field">{label}<input {...props} />{error ? <small className="field-error">{error}</small> : helperText ? <small className="muted">{helperText}</small> : null}</label>; }
+export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) { return <section className={`panel ${className}`}>{children}</section>; }
+export function Badge({ children, variant = "info" }: { children: React.ReactNode; variant?: "success" | "warning" | "error" | "info" }) { return <span className={`badge ${variant}`}>{children}</span>; }
+export function Spinner() { return <LoaderCircle className="spin" size={18} />; }
+export function EmptyState({ title, description, cta }: { title: string; description: string; cta?: React.ReactNode }) { return <div className="empty-state"><strong>{title}</strong><span>{description}</span>{cta}</div>; }

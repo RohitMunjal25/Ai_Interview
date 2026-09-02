@@ -1,0 +1,2 @@
+import type { Question } from "@/types";
+export default function QuestionCard({ question, index, total }: { question: Question; index: number; total: number }) { return <div className="question-card"><div className="question-meta"><span>Question {index + 1} of {total}</span><span className="badge">{question.type}</span><span className="badge neutral">{question.difficulty}</span></div><div className="progress-track"><i style={{ width: `${((index + 1) / total) * 100}%` }} /></div><h2>{question.text}</h2></div>; }
