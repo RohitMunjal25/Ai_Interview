@@ -2,22 +2,44 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Volume2, Loader2 } from "lucide-react";
-import { getQuestionAudio, transcribeAudioAnswer } from "@/lib/api";
+import {
+    Mic,
+    MicOff,
+    Volume2,
+    Loader2,
+    Send,
+    AudioLines,
+} from "lucide-react";
+
+import {
+    getQuestionAudio,
+    transcribeAudioAnswer,
+} from "@/lib/api";
 
 interface Props {
     onSubmit: (answer: string, timeTaken: number) => void;
+
+    // Optional callback for submitting the original audio directly.
+    onAudioSubmit?: (
+        audioBlob: Blob,
+        timeTaken: number
+    ) => void | Promise<void>;
+
     busy: boolean;
     interviewId: string;
     questionId: string;
     mode: "text" | "audio";
 }
 
-const SILENCE_THRESHOLD = 10;
-const SILENCE_DELAY_MS = 2500;
+type RecordStatus =
+    | "idle"
+    | "recording"
+    | "transcribing"
+    | "submitting-audio";
 
 export default function AnswerRecorder({
     onSubmit,
+    onAudioSubmit,
     busy,
     interviewId,
     questionId,
@@ -25,93 +47,113 @@ export default function AnswerRecorder({
 }: Props) {
     const [answer, setAnswer] = useState("");
     const [error, setError] = useState("");
-    const [started] = useState(() => Date.now());
     const [seconds, setSeconds] = useState(0);
     const [audioStarted, setAudioStarted] = useState(false);
+    const [recordStatus, setRecordStatus] =
+        useState<RecordStatus>("idle");
 
     const [aiStatus, setAiStatus] = useState<
         "idle" | "loading" | "playing" | "done"
     >("idle");
 
-    const [recordStatus, setRecordStatus] = useState<
-        "idle" | "recording" | "transcribing"
-    >("idle");
+    const [recordedAudio, setRecordedAudio] =
+        useState<Blob | null>(null);
 
-    const [silenceCountdown, setSilenceCountdown] =
-        useState<number | null>(null);
-
+    const startedRef = useRef(Date.now());
     const audioRef = useRef<HTMLAudioElement | null>(null);
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const chunksRef = useRef<Blob[]>([]);
-    const analyserRef = useRef<AnalyserNode | null>(null);
-    const silenceTimerRef = useRef<number | null>(null);
-    const silenceCountdownRef = useRef<number | null>(null);
-    const streamRef = useRef<MediaStream | null>(null);
+    const audioUrlRef = useRef<string | null>(null);
 
-    // Timer
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+    const chunksRef = useRef<Blob[]>([]);
+
+    const mountedRef = useRef(true);
+
+    // Interview timer
     useEffect(() => {
         const id = window.setInterval(() => {
-            setSeconds(Math.floor((Date.now() - started) / 1000));
+            setSeconds(
+                Math.floor((Date.now() - startedRef.current) / 1000)
+            );
         }, 1000);
 
         return () => window.clearInterval(id);
-    }, [started]);
+    }, []);
 
-    // Cleanup when question changes or component unmounts
+    // Reset when question changes
     useEffect(() => {
-        return () => {
-            audioRef.current?.pause();
-            audioRef.current = null;
+        startedRef.current = Date.now();
 
-            stopSilenceDetection();
-
-            if (mediaRecorderRef.current?.state === "recording") {
-                mediaRecorderRef.current.stop();
-            }
-
-            streamRef.current?.getTracks().forEach((track) => track.stop());
-        };
-    }, [questionId]);
-
-    // Reset state for every new question
-    useEffect(() => {
+        setSeconds(0);
         setAnswer("");
+        setError("");
         setAudioStarted(false);
         setAiStatus("idle");
         setRecordStatus("idle");
-        setError("");
+        setRecordedAudio(null);
+
+        return () => {
+            // Prevent an old recording from transcribing after
+            // the user has moved to another question.
+            const recorder = mediaRecorderRef.current;
+
+            if (recorder) {
+                recorder.ondataavailable = null;
+                recorder.onstop = null;
+
+                if (recorder.state !== "inactive") {
+                    recorder.stop();
+                }
+            }
+
+            streamRef.current?.getTracks().forEach((track) => {
+                track.stop();
+            });
+
+            streamRef.current = null;
+            mediaRecorderRef.current = null;
+            chunksRef.current = [];
+
+            audioRef.current?.pause();
+            audioRef.current = null;
+
+            if (audioUrlRef.current) {
+                URL.revokeObjectURL(audioUrlRef.current);
+                audioUrlRef.current = null;
+            }
+        };
     }, [questionId]);
 
-    function stopSilenceDetection() {
-        if (silenceTimerRef.current !== null) {
-            window.clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-        }
+    useEffect(() => {
+        mountedRef.current = true;
 
-        if (silenceCountdownRef.current !== null) {
-            window.clearInterval(silenceCountdownRef.current);
-            silenceCountdownRef.current = null;
-        }
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
 
-        setSilenceCountdown(null);
-    }
-
-    // Play AI-generated question audio
+    // Play AI-generated interview question
     async function playQuestion() {
         try {
             setError("");
             setAiStatus("loading");
 
-            const blob = await getQuestionAudio(interviewId, questionId);
+            const blob = await getQuestionAudio(
+                interviewId,
+                questionId
+            );
 
             const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
+            audioUrlRef.current = url;
 
+            const audio = new Audio(url);
             audioRef.current = audio;
 
             audio.onended = () => {
                 setAiStatus("done");
+
                 URL.revokeObjectURL(url);
+                audioUrlRef.current = null;
 
                 if (mode === "audio") {
                     void startRecording();
@@ -120,214 +162,202 @@ export default function AnswerRecorder({
 
             audio.onerror = () => {
                 setAiStatus("done");
+
                 URL.revokeObjectURL(url);
+                audioUrlRef.current = null;
 
                 setError(
-                    "Could not play audio. You can still record your answer."
+                    "Question audio is unavailable. You can still record or type your answer."
                 );
-
-                if (mode === "audio") {
-                    void startRecording();
-                }
             };
 
             await audio.play();
-
             setAiStatus("playing");
         } catch (err) {
             console.error("Question audio error:", err);
 
             setAiStatus("done");
-            setError("Could not load question audio.");
 
-            if (mode === "audio") {
-                void startRecording();
-            }
+            setError(
+                "Question audio is temporarily unavailable. You can still answer manually or record your answer."
+            );
         }
     }
 
     // Start microphone recording
     async function startRecording() {
-        if (mediaRecorderRef.current?.state === "recording") {
+        if (busy || recordStatus !== "idle") return;
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setError("Microphone recording is not supported in this browser.");
             return;
         }
 
-        setError("");
-
         try {
+            setError("");
+            setRecordedAudio(null);
+            chunksRef.current = [];
+
             const stream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                },
             });
 
             streamRef.current = stream;
 
             const recorder = new MediaRecorder(stream);
 
-            chunksRef.current = [];
+            mediaRecorderRef.current = recorder;
 
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    chunksRef.current.push(e.data);
+            recorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    chunksRef.current.push(event.data);
                 }
             };
 
             recorder.onstop = async () => {
                 stream.getTracks().forEach((track) => track.stop());
-                streamRef.current = null;
 
-                stopSilenceDetection();
+                if (streamRef.current === stream) {
+                    streamRef.current = null;
+                }
 
                 const audioBlob = new Blob(chunksRef.current, {
-                    type: "audio/webm",
+                    type: recorder.mimeType || "audio/webm",
                 });
 
+                mediaRecorderRef.current = null;
+
+                console.log("Recording details:", {
+                    mimeType: recorder.mimeType,
+                    blobType: audioBlob.type,
+                    size: audioBlob.size,
+                    chunks: chunksRef.current.length,
+                });
+
+                if (!mountedRef.current) return;
+
                 if (audioBlob.size === 0) {
-                    setError("No audio was recorded. Please try again.");
                     setRecordStatus("idle");
+                    setError("No audio was recorded. Please try again.");
                     return;
                 }
 
+                setRecordedAudio(audioBlob);
                 setRecordStatus("transcribing");
 
                 try {
-                    // IMPORTANT: Pass questionId as required by the API
-                    const text = await transcribeAudioAnswer(
+                    const transcript = await transcribeAudioAnswer(
                         interviewId,
                         questionId,
                         audioBlob
                     );
 
-                    if (text?.trim()) {
-                        setAnswer((prev) =>
-                            prev ? `${prev} ${text.trim()}` : text.trim()
+                    if (!mountedRef.current) return;
+
+                    if (transcript.trim()) {
+                        setAnswer((previous) =>
+                            previous.trim()
+                                ? `${previous.trim()} ${transcript.trim()}`
+                                : transcript.trim()
                         );
+
+                        setError("");
                     } else {
                         setError(
-                            "No speech was detected. Please try recording again."
+                            "No speech detected. You can type your answer manually."
                         );
                     }
                 } catch (err) {
-                    console.error("Audio transcription error:", err);
+                    console.error("Transcription error:", err);
 
-                    setError(
-                        err instanceof Error
-                            ? `Transcription failed: ${err.message}`
-                            : "Voice transcription failed. Please type your answer below."
-                    );
+                    if (mountedRef.current) {
+                        setError(
+                            "Transcription failed. Your recording is saved; you can type your answer manually or submit the recorded audio."
+                        );
+                    }
                 } finally {
-                    setRecordStatus("idle");
+                    if (mountedRef.current) {
+                        setRecordStatus("idle");
+                    }
                 }
             };
 
-            recorder.start(100);
-
-            mediaRecorderRef.current = recorder;
+            recorder.start(250);
 
             setRecordStatus("recording");
-
-            // Silence detection using Web Audio API
-            const audioCtx = new AudioContext();
-
-            const source = audioCtx.createMediaStreamSource(stream);
-            const analyser = audioCtx.createAnalyser();
-
-            analyser.fftSize = 512;
-
-            source.connect(analyser);
-
-            analyserRef.current = analyser;
-
-            const data = new Uint8Array(analyser.frequencyBinCount);
-
-            let silenceStart: number | null = null;
-
-            function checkSilence() {
-                if (!analyserRef.current) return;
-
-                analyserRef.current.getByteFrequencyData(data);
-
-                const avg =
-                    data.reduce((a, b) => a + b, 0) / data.length;
-
-                if (avg < SILENCE_THRESHOLD) {
-                    if (silenceStart === null) {
-                        silenceStart = Date.now();
-
-                        setSilenceCountdown(
-                            Math.ceil(SILENCE_DELAY_MS / 1000)
-                        );
-
-                        silenceCountdownRef.current =
-                            window.setInterval(() => {
-                                const remaining = Math.ceil(
-                                    (
-                                        SILENCE_DELAY_MS -
-                                        (Date.now() -
-                                            (silenceStart ?? Date.now()))
-                                    ) / 1000
-                                );
-
-                                setSilenceCountdown(
-                                    remaining > 0 ? remaining : 0
-                                );
-                            }, 500);
-                    } else if (
-                        Date.now() - silenceStart >= SILENCE_DELAY_MS
-                    ) {
-                        stopRecording();
-                        return;
-                    }
-                } else {
-                    if (silenceStart !== null) {
-                        silenceStart = null;
-                        stopSilenceDetection();
-                    }
-                }
-
-                if (mediaRecorderRef.current?.state === "recording") {
-                    requestAnimationFrame(checkSilence);
-                }
-            }
-
-            requestAnimationFrame(checkSilence);
         } catch (err) {
-            console.error("Microphone recording error:", err);
+            console.error("Microphone error:", err);
 
-            streamRef.current?.getTracks().forEach((track) => track.stop());
+            streamRef.current?.getTracks().forEach((track) => {
+                track.stop();
+            });
+
             streamRef.current = null;
 
             setRecordStatus("idle");
 
             setError(
-                "Microphone access failed. Please allow microphone access and try again."
+                "Microphone access failed. Allow microphone permission or type your answer manually."
             );
         }
     }
 
-    // Stop microphone recording
+    // Stop recording
     function stopRecording() {
-        if (mediaRecorderRef.current?.state === "recording") {
-            mediaRecorderRef.current.stop();
+        const recorder = mediaRecorderRef.current;
+
+        if (recorder && recorder.state === "recording") {
+            recorder.stop();
         }
-
-        mediaRecorderRef.current = null;
-        analyserRef.current = null;
-
-        setRecordStatus("idle");
-
-        stopSilenceDetection();
     }
 
-    // Submit answer
-    function submit() {
+    // Submit typed or transcribed answer
+    function submitTextAnswer() {
         if (!answer.trim()) {
-            setError("Please write or record an answer before submitting.");
+            setError("Please write or record your answer first.");
             return;
         }
 
         setError("");
-
         onSubmit(answer.trim(), seconds);
+    }
+
+    // Submit original audio directly
+    async function submitDirectAudio() {
+        if (!recordedAudio) {
+            setError("Please record your answer first.");
+            return;
+        }
+
+        if (!onAudioSubmit) {
+            setError(
+                "Direct audio submission is not connected yet. Please submit your text answer instead."
+            );
+            return;
+        }
+
+        try {
+            setError("");
+            setRecordStatus("submitting-audio");
+
+            await onAudioSubmit(recordedAudio, seconds);
+        } catch (err) {
+            console.error("Direct audio submission error:", err);
+
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Could not submit audio. Please try again."
+            );
+        } finally {
+            if (mountedRef.current) {
+                setRecordStatus("idle");
+            }
+        }
     }
 
     const mm = Math.floor(seconds / 60)
@@ -338,8 +368,65 @@ export default function AnswerRecorder({
         .toString()
         .padStart(2, "0");
 
-    const isTranscribing = recordStatus === "transcribing";
     const isRecording = recordStatus === "recording";
+    const isTranscribing = recordStatus === "transcribing";
+    const isSubmittingAudio = recordStatus === "submitting-audio";
+
+    const isProcessing =
+        isTranscribing || isSubmittingAudio;
+
+    // Shared answer textarea
+    const answerEditor = (
+        <div style={{ marginBottom: 12 }}>
+            <div
+                style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    marginBottom: 8,
+                }}
+            >
+                Your answer
+            </div>
+
+            <textarea
+                value={answer}
+                onChange={(event) => {
+                    setAnswer(event.target.value);
+
+                    if (event.target.value.trim()) {
+                        setError("");
+                    }
+                }}
+                disabled={busy || isRecording || isSubmittingAudio}
+                placeholder={
+                    "Your transcribed answer will appear here.\n\nIf your microphone does not work, you can type your answer manually..."
+                }
+                style={{
+                    width: "100%",
+                    minHeight: 130,
+                    resize: "vertical",
+                    padding: 12,
+                    boxSizing: "border-box",
+                }}
+            />
+
+            <div
+                style={{
+                    color: "#999",
+                    fontSize: 12,
+                    marginTop: 5,
+                }}
+            >
+                Edit your transcript or type your answer manually.
+            </div>
+        </div>
+    );
+
+    const errorMessage = error ? (
+        <div className="notice error" style={{ marginBottom: 12 }}>
+            {error}
+        </div>
+    ) : null;
 
     // TEXT MODE
     if (mode === "text") {
@@ -353,32 +440,22 @@ export default function AnswerRecorder({
                 <div
                     style={{
                         display: "flex",
+                        flexWrap: "wrap",
                         gap: 8,
-                        marginBottom: 10,
+                        marginBottom: 12,
                     }}
                 >
                     <button
                         type="button"
                         className="button secondary"
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 13,
-                        }}
                         onClick={() => void playQuestion()}
                         disabled={
+                            busy ||
                             aiStatus === "loading" ||
-                            aiStatus === "playing" ||
-                            busy
+                            aiStatus === "playing"
                         }
                     >
-                        {aiStatus === "loading" || aiStatus === "playing" ? (
-                            <Loader2 size={14} />
-                        ) : (
-                            <Volume2 size={14} />
-                        )}
-
+                        <Volume2 size={14} />
                         {aiStatus === "loading"
                             ? "Loading..."
                             : aiStatus === "playing"
@@ -388,55 +465,38 @@ export default function AnswerRecorder({
 
                     <button
                         type="button"
-                        className={`button ${
-                            isRecording ? "primary" : "secondary"
-                        }`}
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 13,
-                        }}
+                        className="button secondary"
                         onClick={
                             isRecording
                                 ? stopRecording
                                 : () => void startRecording()
                         }
-                        disabled={busy || isTranscribing}
+                        disabled={busy || isProcessing}
                     >
-                        {isTranscribing ? (
-                            <Loader2 size={14} />
-                        ) : isRecording ? (
+                        {isRecording ? (
                             <MicOff size={14} />
+                        ) : isTranscribing ? (
+                            <Loader2 size={14} />
                         ) : (
                             <Mic size={14} />
                         )}
 
-                        {isTranscribing
-                            ? "Transcribing..."
-                            : isRecording
-                              ? "Stop recording"
+                        {isRecording
+                            ? "Stop recording"
+                            : isTranscribing
+                              ? "Transcribing..."
                               : "Record answer"}
                     </button>
                 </div>
 
-                <textarea
-                    value={answer}
-                    onChange={(e) => {
-                        setAnswer(e.target.value);
-                        if (e.target.value.trim()) setError("");
-                    }}
-                    placeholder="Think out loud. Strong answers are specific, structured, and grounded in your experience."
-                />
-
-                {error && (
-                    <div className="notice error">{error}</div>
-                )}
+                {answerEditor}
+                {errorMessage}
 
                 <button
+                    type="button"
                     className="button primary"
-                    disabled={busy || isTranscribing}
-                    onClick={submit}
+                    disabled={busy || isProcessing || isRecording}
+                    onClick={submitTextAnswer}
                 >
                     {busy ? "Submitting..." : "Submit answer"}
                 </button>
@@ -452,22 +512,16 @@ export default function AnswerRecorder({
                 <span>{mm}:{ss} spent</span>
             </div>
 
-            {!audioStarted ? (
+            {!audioStarted && (
                 <div
                     style={{
                         textAlign: "center",
-                        padding: "24px 0",
+                        padding: "20px 0",
                     }}
                 >
                     <button
                         type="button"
                         className="button primary"
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            margin: "0 auto",
-                        }}
                         disabled={busy}
                         onClick={() => {
                             setAudioStarted(true);
@@ -480,15 +534,17 @@ export default function AnswerRecorder({
 
                     <p
                         style={{
-                            color: "#aaa",
+                            color: "#999",
                             fontSize: 13,
                             marginTop: 10,
                         }}
                     >
-                        Click to hear the question, then answer by voice.
+                        You can also type your answer below if audio is unavailable.
                     </p>
                 </div>
-            ) : (
+            )}
+
+            {audioStarted && (
                 <div
                     style={{
                         display: "flex",
@@ -501,144 +557,147 @@ export default function AnswerRecorder({
                         fontSize: 13,
                     }}
                 >
-                    <Volume2
-                        size={16}
-                        style={{
-                            color:
-                                aiStatus === "playing" ? "#6c8fff" : "#555",
-                        }}
-                    />
+                    <Volume2 size={16} />
 
-                    <span
-                        style={{
-                            color:
-                                aiStatus === "playing" ? "#6c8fff" : "#aaa",
-                        }}
-                    >
+                    <span>
                         {aiStatus === "loading"
                             ? "Loading question audio..."
                             : aiStatus === "playing"
                               ? "AI is speaking..."
                               : aiStatus === "done"
-                                ? "AI finished speaking"
-                                : "Preparing..."}
+                                ? "Question audio finished or unavailable"
+                                : "Ready"}
                     </span>
+
+                    <button
+                        type="button"
+                        className="button secondary"
+                        style={{ marginLeft: "auto", fontSize: 12 }}
+                        onClick={() => void playQuestion()}
+                        disabled={
+                            busy ||
+                            aiStatus === "loading" ||
+                            aiStatus === "playing"
+                        }
+                    >
+                        Replay
+                    </button>
                 </div>
             )}
 
-            {/* Microphone status */}
+            {/* Microphone controls */}
             <div
                 style={{
                     display: "flex",
+                    flexWrap: "wrap",
                     alignItems: "center",
                     gap: 10,
-                    padding: "10px 14px",
-                    marginBottom: 12,
-                    borderRadius: 8,
-                    background: "#1a1f2e",
-                    fontSize: 13,
+                    marginBottom: 14,
                 }}
             >
-                {isRecording ? (
-                    <>
-                        <Mic
-                            size={16}
-                            style={{ color: "#22c55e" }}
-                        />
+                <button
+                    type="button"
+                    className={`button ${isRecording ? "primary" : "secondary"}`}
+                    onClick={
+                        isRecording
+                            ? stopRecording
+                            : () => void startRecording()
+                    }
+                    disabled={busy || isProcessing}
+                >
+                    {isRecording ? (
+                        <MicOff size={16} />
+                    ) : isTranscribing ? (
+                        <Loader2 size={16} />
+                    ) : (
+                        <Mic size={16} />
+                    )}
 
-                        <span style={{ color: "#22c55e" }}>
-                            {silenceCountdown !== null
-                                ? `Listening... stopping in ${silenceCountdown}s`
-                                : "Listening... speak your answer"}
-                        </span>
+                    {isRecording
+                        ? "Stop recording"
+                        : isTranscribing
+                          ? "Transcribing..."
+                          : "Record answer"}
+                </button>
 
-                        <button
-                            type="button"
-                            className="button secondary"
-                            style={{
-                                marginLeft: "auto",
-                                fontSize: 12,
-                                padding: "4px 10px",
-                            }}
-                            onClick={stopRecording}
-                        >
-                            Stop early
-                        </button>
-                    </>
-                ) : isTranscribing ? (
-                    <>
-                        <Loader2
-                            size={16}
-                            style={{ color: "#f59e0b" }}
-                        />
+                {isRecording && (
+                    <span style={{ color: "#22c55e", fontSize: 13 }}>
+                        Listening... Speak your answer.
+                    </span>
+                )}
 
-                        <span style={{ color: "#f59e0b" }}>
-                            Transcribing your answer...
-                        </span>
-                    </>
-                ) : (
-                    <>
-                        <MicOff
-                            size={16}
-                            style={{ color: "#555" }}
-                        />
-
-                        <span style={{ color: "#aaa" }}>
-                            {aiStatus === "playing"
-                                ? "Mic starts after AI finishes"
-                                : "Microphone idle"}
-                        </span>
-                    </>
+                {isTranscribing && (
+                    <span style={{ color: "#f59e0b", fontSize: 13 }}>
+                        Converting speech to text...
+                    </span>
                 )}
             </div>
 
-            {/* Editable transcript */}
-            {(answer || isTranscribing) && (
-                <div style={{ marginBottom: 12 }}>
+            {/* Always-visible manual answer area */}
+            {answerEditor}
+
+            {/* Original audio submission */}
+            {recordedAudio && (
+                <div
+                    style={{
+                        padding: 12,
+                        borderRadius: 8,
+                        background: "#1a1f2e",
+                        marginBottom: 12,
+                    }}
+                >
                     <div
                         style={{
-                            fontSize: 12,
-                            color: "#aaa",
-                            marginBottom: 4,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            fontSize: 13,
+                            marginBottom: 10,
                         }}
                     >
-                        Your transcribed answer (you can edit before
-                        submitting):
+                        <AudioLines size={16} />
+                        Original recording saved
                     </div>
 
-                    <textarea
-                        value={answer}
-                        onChange={(e) => {
-                            setAnswer(e.target.value);
-                            if (e.target.value.trim()) setError("");
-                        }}
-                        placeholder="Your spoken answer will appear here..."
-                        style={{ minHeight: 100 }}
-                    />
+                    {onAudioSubmit && (
+                        <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => void submitDirectAudio()}
+                            disabled={
+                                busy ||
+                                isRecording ||
+                                isProcessing
+                            }
+                        >
+                            {isSubmittingAudio ? (
+                                <Loader2 size={15} />
+                            ) : (
+                                <Send size={15} />
+                            )}
+
+                            Submit original audio
+                        </button>
+                    )}
                 </div>
             )}
 
-            {error && (
-                <div className="notice error">{error}</div>
-            )}
+            {errorMessage}
 
             <button
+                type="button"
                 className="button primary"
                 disabled={
                     busy ||
-                    isTranscribing ||
                     isRecording ||
+                    isProcessing ||
                     !answer.trim()
                 }
-                onClick={submit}
+                onClick={submitTextAnswer}
             >
                 {busy
                     ? "Submitting..."
-                    : isTranscribing
-                      ? "Transcribing..."
-                      : isRecording
-                        ? "Recording..."
-                        : "Submit answer"}
+                    : "Submit written answer"}
             </button>
         </div>
     );
