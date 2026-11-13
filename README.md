@@ -1,44 +1,80 @@
 # AI Interview Analyzer
 
-AI Interview Analyzer is a Next.js application for resume-based interview practice. Candidates upload a resume, choose a target role and difficulty, complete a proctored interview, and review their performance report.
+AI Interview Analyzer is a Next.js application for resume-based interview practice. Candidates can upload their resumes, select a target job role and difficulty level, complete AI-powered interviews with camera-based proctoring, and review detailed performance reports.
 
 ## Features
 
-- Email-based signup, verification, login, and OTP password recovery
-- Resume upload with backend resume validation and parsing
-- AI-generated technical, behavioral, and situational questions
-- Live text answers with per-question timing
-- Camera-based proctoring with permission handling and cleanup
-- Interview integrity warnings for tab switches, window blur, fullscreen exit, copy, and paste activity
+### Authentication
+- Email-based signup and verification
+- Secure login and authenticated sessions
+- OTP-based password recovery and reset
+- Protected dashboard and interview routes
+
+### Resume and Interview Preparation
+- Resume upload with backend validation and parsing
+- AI-powered job role suggestions based on uploaded resumes
+- AI-generated technical, behavioral, and situational interview questions
+- Configurable target role and interview difficulty
+
+### Interview Experience
+- Live text-based answers with per-question timing
+- AI-generated question audio playback
+- Microphone-based audio recording
+- Speech-to-text transcription of recorded answers
+- Editable transcripts before answer submission
+- Direct audio answer submission without manual transcript review
+- Recording and microphone cleanup between interview sessions
+
+### Proctoring and Integrity
+- Camera-based proctoring with permission handling
+- Proctoring session start and termination
+- Tab-switch and window-blur detection
+- Fullscreen exit warnings
+- Copy and paste activity monitoring
+- Camera and media stream cleanup when the interview ends or the page changes
+
+### Reports and Dashboard
 - Partial progress reports for unfinished interviews
-- Completed reports with scoring, feedback, strengths, improvements, and PDF download
-- Responsive dashboard, profile, and interview workspace
+- Completed interview reports with scores and feedback
+- Strengths and improvement recommendations
+- Detailed interview performance summaries
+- PDF report download
+- Responsive dashboard and user profile
 
 ## Tech Stack
 
-- Next.js App Router
-- React and TypeScript
-- Tailwind CSS
-- React Hook Form and Zod
-- Lucide React
-- react-hot-toast
-- Backend Gemini integration through the API service
+- **Framework:** Next.js App Router
+- **Frontend:** React, TypeScript, Tailwind CSS
+- **Forms and Validation:** React Hook Form, Zod
+- **Icons:** Lucide React
+- **Notifications:** react-hot-toast
+- **AI Integration:** Backend Gemini integration through API services
+- **Audio:** Browser MediaRecorder and microphone APIs
+- **Authentication:** Bearer-token-based authenticated API requests
+- **Deployment:** Vercel
 
 ## Getting Started
 
-Install dependencies:
+### 1. Install dependencies
 
 ```bash
 npm install
 ```
 
+### 2. Configure environment variables
+
 Create `.env.local` in the project root:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://your-api-host.example.com
+NEXT_PUBLIC_PROFILE_UPDATE_URL=/api/user/profile
 ```
 
-Start the development server:
+`NEXT_PUBLIC_API_BASE_URL` should point to your backend API host.
+
+`NEXT_PUBLIC_PROFILE_UPDATE_URL` is optional and should only be configured if the backend supports profile updates.
+
+### 3. Start the development server
 
 ```bash
 npm run dev
@@ -46,27 +82,114 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Application Flow
+
+1. Create an account and verify the email address.
+2. Sign in and access the dashboard.
+3. Start a new interview.
+4. Upload a resume and select a target job role and difficulty.
+5. The backend validates and parses the resume and generates interview questions.
+6. Start the interview with camera-based proctoring.
+7. Listen to questions using audio playback when required.
+8. Submit answers using text input or microphone recording.
+9. For audio answers, either review and edit the generated transcript or submit the recording directly.
+10. Complete the interview and review the performance report.
+11. Download the report as a PDF when available.
+
+## API Configuration
+
+All API requests are centralized in `src/lib/api.ts`.
+
+The API service handles authenticated requests and attaches the bearer token stored in the browser. Expired sessions are handled by the frontend authentication flow.
+
+### Authentication APIs
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/auth/signup` | Create a new account |
+| POST | `/api/auth/verify-email` | Verify email address |
+| POST | `/api/auth/login` | Authenticate user |
+| POST | `/api/auth/forgot-password` | Request password reset |
+| POST | `/api/auth/reset-password` | Reset password |
+
+### User APIs
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/user/dashboard` | Get dashboard data |
+| GET | `/api/user/profile` | Get user profile |
+
+### Interview APIs
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/interview/upload-resume` | Upload and validate resume |
+| GET | `/api/interview/suggest-job-roles` | Suggest roles based on resume |
+| POST | `/api/interview/generate-questions` | Generate interview questions |
+| POST | `/api/interview/:interviewId/answer` | Submit a text answer |
+| GET | `/api/interview/:interviewId/questions/:questionId/audio` | Retrieve question audio |
+| POST | `/api/interview/:interviewId/answer/audio` | Transcribe and submit an audio answer |
+| POST | `/api/interview/:interviewId/answer/audio/transcribe` | Transcribe audio into editable text |
+| POST | `/api/interview/:interviewId/proctor/start` | Start proctoring |
+| POST | `/api/interview/:interviewId/proctor/terminate` | Terminate proctoring |
+| GET | `/api/interview/:interviewId/report` | Retrieve interview report |
+| GET | `/api/interview/:interviewId/report/download` | Download interview report |
+
+### Audio Answer Workflows
+
+The application supports two audio submission workflows.
+
+**1. Transcribe and review**
+
+- Record an answer using the microphone.
+- Upload the recording as `multipart/form-data`.
+- Send `questionId` and `audio` to the transcription endpoint.
+- Display the returned transcript for editing.
+- Submit the reviewed answer through the text answer endpoint.
+
+**2. Direct audio submission**
+
+- Record an answer using the microphone.
+- Send `questionId` and `audio` to the direct audio submission endpoint.
+- The backend transcribes and submits the answer in one request.
+
+The transcription endpoint accepts:
+
+- `questionId`: string
+- `audio`: binary audio recording
+
+The frontend uses `FormData` for these requests. The browser should generate the multipart `Content-Type` boundary automatically.
+
+## AI Integration
+
+AI question generation, resume processing, and audio-related backend processing are handled through backend APIs.
+
+No Gemini API key is required in the frontend.
+
 ## Deploying to Vercel
 
-Import this repository into Vercel. Vercel detects the Next.js framework automatically and uses the existing build settings.
-
-Add this production environment variable in **Project Settings > Environment Variables**:
+1. Import the repository into Vercel.
+2. Configure the production environment variables:
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=https://your-production-backend.example.com
 NEXT_PUBLIC_PROFILE_UPDATE_URL=/api/user/profile
 ```
 
-Deploy with the Vercel dashboard or the Vercel CLI:
+3. Deploy using the Vercel dashboard or CLI:
 
 ```bash
 npx vercel
 npx vercel --prod
 ```
 
-The backend must allow requests from the deployed Vercel domain through CORS. Camera proctoring also requires HTTPS, which Vercel provides automatically.
+### Deployment Requirements
 
-Profile-photo updates require the backend to expose `NEXT_PUBLIC_PROFILE_UPDATE_URL`; the current API deployment exposes profile reads only.
+- The backend must allow requests from the deployed Vercel domain through CORS.
+- Camera and microphone access require a secure context, such as HTTPS or localhost.
+- The backend must expose the documented API endpoints.
+- Audio transcription and question audio generation depend on backend and upstream AI/TTS service availability.
+- Profile-photo updates require a backend endpoint that supports profile updates; profile reads alone do not provide this capability.
 
 ## Available Commands
 
@@ -77,62 +200,35 @@ npm run build
 npm run start
 ```
 
-## Application Flow
-
-1. Create an account and verify the email OTP.
-2. Sign in and open **New interview**.
-3. Upload a resume and provide the target job role.
-4. The backend verifies and parses the resume, then generates questions.
-5. Answer each question while camera proctoring is active.
-6. End the interview or finish the final question.
-7. Review the completed or partial report.
-
-## API Configuration
-
-All requests are centralized in `src/lib/api.ts`. Authenticated requests automatically attach the bearer token stored in the browser and handle expired sessions.
-
-The frontend expects these backend endpoints:
-
-- `/api/auth/signup`
-- `/api/auth/verify-email`
-- `/api/auth/login`
-- `/api/auth/forgot-password`
-- `/api/auth/reset-password`
-- `/api/user/dashboard`
-- `/api/user/profile`
-- `/api/interview/upload-resume`
-- `/api/interview/generate-questions`
-- `/api/interview/:interviewId/answer`
-- `/api/interview/:interviewId/proctor/start`
-- `/api/interview/:interviewId/proctor/terminate`
-- `/api/interview/:interviewId/report`
-- `/api/interview/:interviewId/report/download`
-
-Resume verification and Gemini processing are performed by the backend upload and interview APIs. No Gemini API key is required in the frontend.
-
 ## Project Structure
 
 ```text
 src/
-  app/
-    (auth)/
-    (dashboard)/
-    auth-enhancements.css
-    globals.css
-    ui-enhancements.css
-  components/
-    auth/
-    interview/
-    layout/
-    ui/
-  hooks/
-  lib/
-  types/
+├── app/
+│   ├── (auth)/
+│   ├── (dashboard)/
+│   ├── auth-enhancements.css
+│   ├── globals.css
+│   └── ui-enhancements.css
+├── components/
+│   ├── auth/
+│   ├── interview/
+│   ├── layout/
+│   └── ui/
+├── hooks/
+├── lib/
+└── types/
 middleware.ts
 ```
 
-## Notes
+## Important Notes
 
-- Protected dashboard and interview routes require the `token` cookie.
-- The browser also stores the auth token and current interview session in localStorage.
-- Camera access is required for active proctoring, but camera cleanup is handled when the interview ends or the page changes.
+- Protected dashboard and interview routes require authentication.
+- The application uses a `token` cookie for protected routes.
+- The browser also stores authentication and current interview session information in localStorage.
+- Camera access is required for active proctoring.
+- Microphone access is required for audio recording.
+- Media streams should be stopped when recording or proctoring ends.
+- Audio playback and transcription depend on backend service availability.
+- Partial reports may be available for interviews that are not completed.
+- Gemini processing and resume verification are performed by the backend.
